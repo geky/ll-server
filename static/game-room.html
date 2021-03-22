@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<meta charset="utf-8" />
+<html>
+<head>
+<script src="http://ajax.googleapis.com/ajax/libs/jquery/1.12.1/jquery.min.js">
+</script>
+  <script language="javascript" type="text/javascript">
+    $(function() {
+        ws = new WebSocket('ws://' + window.location.host +
+            window.location.pathname + '/ws')
+        // written by server
+        user = USER;
+        room = ROOM;
+        game = null;
+        players = [];
+        player_colors = {}
+
+        ws.onopen = function() {
+            // first thing we do is join the game
+            ws.send(JSON.stringify({
+                'action': 'join_game',
+                'name': user,
+            }))
+        }
+
+        ws.onmessage = function(e) {
+            update = JSON.parse(e.data)
+            console.log('recv', update)
+            game = update.game
+            players = game ? game.players : update.players
+            player_colors = update.player_colors
+
+            // rotate players so we are in front (and removed)
+            var after = []
+            for (var i = 0; i < players.length; i++) {
+                if (players[i] == user) {
+                    // found ourself
+                    players = players.slice(i+1).concat(after)
+                    break
+                }
+
+                after.push(players[i])
+            }
+
+            // first render
+            render()
+
+            // rerender on resize
+            $(window).resize(render)
+        }
+
+        function render_log(msgs) {
+            $('#ourself-log-inner').empty()
+            for (var i = 0; i < msgs.length; i++) {
+                $('#ourself-log-inner').append(
+                    '<div class="log-message" title="' +
+                        msgs[i] + '">' +
+                        msgs[i] + '</div>'
+                )
+            }
+
+            // quick restart?
+            if (game && game.phase == 'ended') {
+                $('#ourself-log-inner').append(
+                    $('<input id="restart-button" type="button" value="new game?"/>')
+                        .click(function() {
+                            ws.send(JSON.stringify({
+                                'action': 'start_game'
+                            }))
+                        })
+                )
+            }
+        }
+
+        // clicked deck?
+        function on_deck() {
+            var i = $(this).index()
+            ws.send(JSON.stringify({
+                action: 'draw',
+                user: user,
+                deck: game.decks[i].name,
+            }))
+        }
+
+        function on_hand(e1) {
+            var card = $(this)
+            e1.preventDefault()
+            $(document).mousemove(function(e2) {
+                card.css({
+                        'position': 'absolute',
+                        'left': e2.pageX - e1.offsetX,
+                        'top': e2.pageY - e1.offsetY,
+                    })
+            })
+
+            $(document).mouseup(function(e2) {
+                $(document).unbind('mousemove')
+                $(document).unbind('mouseup')
+
+                // check if we dragged onto something we care about
+                var x = e2.pageX;
+                var y = e2.pageY;
+                var elems = $(document.elementsFromPoint(x, y))
+                var card = $(elems).filter('.hand-card').first()
+                    .index()
+                var other = $(elems).filter('.other-inner')
+                    .first()
+                    .parent().index()
+                var ourself = $(elems).filter('#ourself-ourself-inner')
+                    .first()
+                    .length > 0
+                if (other >= 0) {
+                    ws.send(JSON.stringify({
+                        action: 'play',
+                        user: user,
+                        target: players[other],
+                        card: game.down_hands[user][card]
+                    }))
+                } else if (ourself) {
+                    ws.send(JSON.stringify({
+                        action: 'play',
+                        user: user,
+                        target: user,
+                        card: game.down_hands[user][card]
+                    }))
+                }
+            })
+        }
+
+        // get image and set height before loading
+        function render_card(url, height) {
+            var img = $('<img src="' + url + '"/>')
+            img[0].height = height
+            return img
+        }
+
+        // update page
+        function render() {
+            // what's our card size? note we assume they're
+            // all the same size...
+            if (game) {
+                var back = game.card_imgs[null]
+            }
+
+            // misc before game rendering
+            if (!game) {
+                $('#start-button').show()
+            } else {
+                $('#start-button').hide()
+            }
+
+            // update log
+            if (!game) {
+                render_log(['Waiting for players...'])
+            } else {
+                render_log(game.log)
+            }
+
+            // update deck state
+            if (game) {
+                var decks = $('#decks').empty()
+                var height = $('#ourself-deck-inner').height()
+                for (var i = 0; i < game.decks.length; i++) {
+                    decks.append(
+                        $('<div class=deck>')
+                            .append(render_card(
+                                game.card_imgs[game.decks[i].card],
+                                height
+                            ))
+                            .append(game.decks[i].name + ' (' + game.decks[i].count + ')')
+                            .click(on_deck)
+                    )
+                }
+            }
+
+            // update our hand
+            var hand_inner = $('#ourself-hand-inner')
+                .css('background-color', player_colors[user])
+                .empty()
+            if (game &&
+                    game.current == user &&
+                    game.phase == "deciding_stabby") {
+                hand_inner.append('<div class="hint">Decide which card to swap!</div>')
+            }
+            hand_inner.append('<div id="hand">')
+
+            var hand = $('#hand').empty()
+            var height = $('#ourself-hand-inner').height() - 2*24
+            var width = $('#ourself-hand-inner').width() - 2*24
+            var offset = $('#ourself-hand-inner').offset()
+            if (game) {
+                for (var i = 0; i < game.down_hands[user].length; i++) {
+                    hand.append(
+                        $('<div class=hand-card>')
+                            .append(render_card(
+                                game.card_imgs[game.down_hands[user][i]],
+                                height
+                            ))
+                        .css({
+                            'position': 'absolute',
+                            'top': 24 + offset.top,
+                            'left': 24 + i*(width/game.down_hands[user].length) + offset.left,
+                        })
+                        .mousedown(on_hand)
+                    )
+                }
+            }
+
+            $('#ourself-ourself-inner')
+                .css('background-color', player_colors[user])
+                .empty()
+                .append(
+                    '<div class="name">' + user +
+                        (game && game.current == user
+                            ? ' (your turn)'
+                            : ''
+                        ) +
+                        '</div>'
+                )
+                .append('<div id="hand2">')
+            var hand2 = $('#hand2').empty()
+            var height = $('#ourself-ourself-inner').height() - 2*24
+            if (game) {
+                for (var i = 0; i < game.up_hands[user].length; i++) {
+                    hand2.append(
+                        $('<div class=hand2-card>')
+                            .append(render_card(
+                                game.card_imgs[game.up_hands[user][i]],
+                                height
+                            ))
+                    )
+                }
+            }
+
+            // update players
+            var others = $('#others').empty()
+            for (var i = 0; i < players.length; i++) {
+                var height = $('#others').height() - 3*24
+                var other_hand = $('<div class="other-hand">')
+                if (game) {
+                    for (var j = 0; j < game.down_hands[players[i]].length; j++) {
+                        other_hand.append(
+                            $('<div class=other-hand-card>')
+                                .append(render_card(
+                                    game.phase != 'ended'
+                                        ? game.card_imgs[null]
+                                        : game.card_imgs[game.down_hands[players[i]][j]],
+                                    height
+                                ))
+                        )
+                    }
+                    for (var j = 0; j < game.up_hands[players[i]].length; j++) {
+                        other_hand.append(
+                            $('<div class=other-hand-card>')
+                                .append(render_card(
+                                    game.card_imgs[game.up_hands[players[i]][j]],
+                                    height
+                                ))
+                        )
+                    }
+                }
+
+                var other_inner = $('<div class="other-inner" style="' +
+                    'background-color:' + player_colors[players[i]] + '">')
+                    .append(other_hand)
+                    .append('<div class="name">' + players[i] +
+                        (game && game.current == players[i]
+                            ? ' (their turn)'
+                            : ''
+                        ) +
+                        '</div>')
+                var other = $('<div class="other">')
+                    .append(other_inner)
+                others.append(other)
+            }
+        }
+
+        $('#start-button').click(function() {
+            ws.send(JSON.stringify({
+                'action': 'start_game'
+            }))
+        })
+    });
+</script>
+<style>
+    html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        margin: 0;
+        background-color: #ccc;
+        font-family: Consolas, monaco, monospace;
+        font-size: 14px;
+    }
+    input {
+        font-family : inherit;
+    }
+    .name, .log-message {
+        margin: 8px;
+    }
+    #others {
+        width: 100%;
+        height: 30%;
+        display: flex;
+        flex-direction: row;
+        justify-content: space-evenly;
+    }
+    .other {
+        height: 100%;
+        width: 100%;
+        display: flex;
+    }
+    .other-inner {
+        flex: 1;
+        margin: 0 24px 24px 24px;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+    }
+    .other-inner > .name {
+        text-align: right;
+    }
+    #ourself {
+        width: 100%;
+        flex: 1;
+        display: flex;
+        flex-direction: row;
+        overflow: hidden;
+    }
+    #ourself-log {
+        width: 25%;
+        height: 100%;
+        display: flex;
+        overflow: hidden;
+    }
+    #ourself-log-inner {
+        flex: 1;
+        margin: 24px 24px 0 24px;
+        overflow: auto;
+    }
+    #ourself-ourself {
+        width: 25%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+    }
+    #ourself-ourself-inner {
+        margin: 24px 24px 0 24px;
+        height: 42%;
+    }
+    #ourself-middle {
+        flex: 1;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+    }
+    #ourself-deck {
+        width: 100%;
+        flex: 1;
+        display: flex;
+    }
+    #ourself-deck-inner {
+        flex: 1;
+        margin: 24px;
+    }
+    #decks {
+        display: flex;
+        flex-direction: row;
+        justify-content: space-evenly;
+    }
+    #ourself-hand {
+        width: 100%;
+        height: 60%;
+        display: flex;
+    }
+    #ourself-hand-inner {
+        flex: 1;
+        margin: 24px 24px 0 24px;
+    }
+    #start-button {
+        width: 100%;
+        height: 100%;
+    }
+    #restart-button {
+        width: calc(100% - 8px);
+        margin: 4px;
+    }
+    .deck {
+        display: flex;
+        flex-direction: column;
+        text-align: center;
+        cursor: pointer;
+    }
+    .hand-card {
+        cursor: pointer;
+    }
+    #hand2 {
+        display: flex;
+        flex-direction: row;
+        justify-content: space-evenly;
+    }
+    .other-hand {
+        display: flex;
+        flex-direction: row-reverse;
+        justify-content: space-evenly;
+    }
+    .other-hand-card {
+        transform: rotate(180deg);
+    }
+    .hint {
+        margin: -24px 24px 0 24px;
+    }
+</style>
+</head>
+<body>
+  <div id="others">
+  </div>
+  <div id="ourself">
+    <div id="ourself-log">
+      <div id="ourself-log-inner">
+      </div>
+    </div>
+    <div id="ourself-middle">
+      <div id="ourself-deck">
+        <div id="ourself-deck-inner">
+          <input id="start-button", type="button" value="start!" style="display: none"/>
+          <div id="decks">
+          </div>
+        </div>
+      </div>
+      <div id="ourself-hand">
+        <div id="ourself-hand-inner">
+          <div id="hand">
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="ourself-ourself">
+      <div id="ourself-ourself-inner">
+        <div id="hand2">
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

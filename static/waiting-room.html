@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<meta charset="utf-8" />
+<html>
+<head>
+<script src="http://ajax.googleapis.com/ajax/libs/jquery/1.12.1/jquery.min.js">
+</script>
+  <script language="javascript" type="text/javascript">
+    $(function() {
+        ws = new WebSocket('ws://' + window.location.host + '/ws')
+        rooms = {}
+        prev_room_count = 0
+        // written by server
+        room_types = ROOM_TYPES;
+        random_color = RANDOM_COLOR;
+
+        // apply random color!
+        $('#listing').css('background-color', random_color)
+        $('form').css('background-color', random_color)
+
+        // fill in room types
+        $('#create-type').empty()
+        for (var i = 0; i < room_types.length; i++) {
+            $('#create-type').append(
+                '<option value="' +
+                    room_types[i] + '">' +
+                    room_types[i] + '</option>'
+            )
+        }
+
+        // update page
+        function render() {
+            room_names = Object.keys(rooms).sort()
+            if (room_names.length != 0 || prev_room_count != 0) {
+                var listing = $('#listing').empty()
+                for (var i = 0; i < room_names.length; i++) {
+                    listing.append(
+                        '<div class="room">' +
+                        '<div class="room-name" title="' +
+                            room_names[i] + '">' +
+                            room_names[i] + '</div>' +
+                        '<div class="room-type" title="' +
+                            rooms[room_names[i]].type + '">' +
+                            rooms[room_names[i]].type + '</div>' +
+                        '<div class="room-players" title="' +
+                            rooms[room_names[i]].players.join(',') + '">' +
+                            rooms[room_names[i]].players.join(',') + '</div>' +
+                        '<div class="room-status" title="' + 
+                            rooms[room_names[i]].status + '">' +
+                            rooms[room_names[i]].status + '</div>' +
+                        '</div>'
+                    )
+                }
+
+                $('.room').unbind('click')
+                $('.room').click(function(e) {
+                    $('#join-name').val(
+                        $(this).find('.room-name').text()
+                    )
+                })
+            }
+
+            // hack to clear list if last room destroyed
+            prev_room_count = room_names.length
+        }
+
+        ws.onmessage = function(e) {
+            update = JSON.parse(e.data)
+            console.log('recv', update)
+            rooms = update.rooms
+            render()
+        }
+        
+        $('#create-button').click(function() {
+            ws.send(JSON.stringify({
+                'action': 'create_room',
+                'room_name': $('#create-name').val(),
+                'room_type': $('#create-type').val(),
+            }))
+        })
+
+        $('#join-button').click(function() {
+            window.location.href = window.location + 'room/' +
+                $('#join-name').val() + '/' +
+                $('#join-user').val()
+        })
+
+        // disable enter, it's probably not what the user wants
+        $('input').keypress(function(e) {
+            if (e.keyCode == 13) {
+                e.preventDefault()
+                return false
+            }
+        });
+    });
+</script>
+<style>
+    body {
+        width: 700px;
+        margin-left: auto;
+        margin-right: auto;
+        text-align: center;
+        font-family: Consolas, monaco, monospace;
+        font-size: 14px;
+        background-color: #ccc;
+    }
+    input, select {
+        font-family : inherit;
+    }
+    #listing {
+        width: calc(100% - 8px);
+        height: 400px;
+        padding: 4px;
+        margin: 4px 0;
+    }
+    #listing-placeholder {
+        margin: 3px;
+    }
+    .room {
+        display: flex;
+        padding: 1px 0px 2px 0px;
+        margin: 0px 0px 4px 0px;
+        cursor: pointer;
+    }
+    .room:hover {
+        background: #ccc;
+    }
+    .room > div {
+        margin: 0px 4px;
+        text-align: left;
+        overflow: hidden;
+    }
+    .room-name {
+        width: 20%;
+    }
+    .room-type {
+        width: 20%;
+    }
+    .room-players {
+        width: 20%;
+    }
+    .room-status {
+        flex: 1;
+    }
+    h2 {
+        margin: 20px 0px 10px 0px;
+        font-weight: normal;
+        font-size: 12px;
+    }
+    form {
+        display: flex;
+        flex-direction: row;
+        align-items: stretch;
+        margin: -1px 0 0 0;
+        padding: 12px 8px;
+        margin: 4px 0;
+    }
+    label {
+        display: flex;
+        align-items: center;
+    }
+    label > input, label > select {
+        margin: 0px 8px;
+    }
+    input, select {
+        flex: 1;
+        height: 100%;
+        padding: 0;
+        min-width: 10px;
+    }
+    select {
+        background-color: #ccc;
+    }
+    input[type="text"] {
+        height: calc(100% - 2px);
+        background-color: #ccc;
+    }
+    input[type="button"] {
+        margin: 0;
+    }
+    #create-name-label, #join-user-label {
+        width: 50%;
+    }
+    #create-type-label, #join-name-label {
+        width: 35%;
+    }
+    #create-button-label, #join-button-label {
+        flex: 1;
+    }
+</style>
+</head>
+<body>
+  <h1>Waiting Room</h1>
+  <div id="listing">
+    <p id="listing-placeholder">No one here yet... want to make a room? :)</p>
+  </div>
+  <!--<h2>Create a room</h2>-->
+  <form id="create-room" onsumbit="return false;">
+    <label id="create-name-label">
+      Room name
+      <input id="create-name" type="text"/>
+    </label>
+    <label id="create-type-label">
+      Game type
+      <select id="create-type" name="room-type">
+        <option value="test">test</option>
+      </select>
+    </label>
+    <label id="create-button-label">
+      <input id="create-button" type="button" value="Create"/>
+    </label>
+  </form>
+  <!--<h2>Join a room</h2>-->
+  <form id="join-room" onsumbit="return false;">
+    <label id="join-user-label">
+      User name
+      <input id="join-user" type="text"/>
+    </label>
+    <label id="join-name-label">
+      Room name
+      <input id="join-name" type="text"/>
+    </label>
+    <label id="join-button-label">
+      <input id="join-button" type="button" value="Join"/>
+    </label>
+  </form>
+</body>
+</html>
