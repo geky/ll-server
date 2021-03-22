@@ -157,7 +157,10 @@ impl TestGame {
 
 impl Game for TestGame {
     fn status(&self) -> String {
-        format!("in game")
+        match self.phase {
+            TestGamePhase::Ended => format!("ended"),
+            _ => format!("in game"),
+        }
     }
 
     fn ended(&self) -> bool {

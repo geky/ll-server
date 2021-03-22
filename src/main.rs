@@ -124,7 +124,10 @@ impl GameRoom {
         serde_json::json!({
             "type": self.type_,
             "players": self.players,
-            "status": "waiting on players...",
+            "status": match &self.game {
+                Some(game) => game.status(),
+                None => format!("waiting on players..."),
+            }
         })
     }
 
