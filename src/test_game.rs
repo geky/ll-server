@@ -293,6 +293,9 @@ impl Game for TestGame {
                                 .ok_or_else(|| format!("player {:?} doesn't have card {:?}?", user, card))?;
                             self.down_hands[user].remove(i);
 
+                            // place on discard
+                            self.discard.push(card);
+
                             // update log
                             self.log.push(format!(
                                 "{} played {:?} on {}",
